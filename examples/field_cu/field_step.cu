@@ -11,9 +11,9 @@ struct SimpleTrack {
 };
 
 template<unsigned int N>
-struct WorkBuffer 
+struct FieldPropagationBuffer
 {
-  float  charge[N];
+  int    charge[N];
   float  position[3][N];
   float  momentum[3][N];
   int    index[N];
@@ -29,6 +29,13 @@ void EvaluateField( const float position[3], float fieldValue[3] )
 
 }
 
+// this GPU kernel function is used to initialize 
+//     .. the particles' state ?
+__global__ void init() // curandState_t *states)
+{
+  /* we have to initialize the state */
+  // curand_init(0, 0, 0, states);
+}
 
 
 // V1 -- one per warp
@@ -45,6 +52,7 @@ __global__ void moveInField(adept::BlockData<SimpleTrack> *block,
                            track.position[1], 
                            track.position[2] };
 
+  // Evaluate initial field value
   EvaluateField( pclPosition, fieldVector );
 
   // float restMass = ElectronMass;  // For now ... 
@@ -56,7 +64,6 @@ __global__ void moveInField(adept::BlockData<SimpleTrack> *block,
                         momentumMag * track.direction[1], 
                         momentumMag * track.direction[2] } ;
 
-  // Evaluate initial field value
 
 }
 
