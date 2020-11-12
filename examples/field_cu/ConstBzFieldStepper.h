@@ -1,19 +1,22 @@
 /*
- * ConstBzFieldHelixStepper.h
+ * ConstBzFieldStepper.h
  *
- *  Copied/adapted from GeantV ConstBzFieldHelixStepper.h
+ *  Copied/adapted from GeantV ConstBzFieldStepper.h
  *     J. Apostolakis,  11 Nov 2020
  * 
  *  Original Author: swenzel   ( S. Wenzel ) Apr 23, 2014
  */
 
-#ifndef CONSTBzFIELDHELIXSTEPPER_H_
-#define CONSTBzFIELDHELIXSTEPPER_H_
+#ifndef CONSTBzFIELDSTEPPER_H_
+#define CONSTBzFIELDSTEPPER_H_
 
 // #include <Geant/Config.h>
 #include "VecGeom/base/Global.h"
 // #include <Geant/VectorTypes.h>
-#include "VecGeom/base/Vector3D.h"
+
+// #include "VecGeom/base/Vector3D.h"
+//  May not be needed ... ?   JA 12.11.2020
+//
 //  Later change to <>
 
 //namespace geant {
@@ -24,15 +27,15 @@
  * ( neglecting energy loss of particle )
  * This class is roughly equivalent to TGeoHelix in ROOT
  */
-class ConstBzFieldHelixStepper {
+class ConstBzFieldStepper {
 private:
-  double fBz;
+  float fBz;    //   Adequate accuracy for all expected applications
 
 public:
   VECCORE_ATT_HOST_DEVICE
-  ConstBzFieldHelixStepper(double Bz = 0.) : fBz(Bz) {}
+  ConstBzFieldStepper(float Bz = 0.) : fBz(Bz) {}
 
-  void SetBz(double Bz) { fBz = Bz; }
+  void SetBz(float Bz) { fBz = Bz; }
   double GetBz() const { return fBz; }
 
   /*
@@ -98,7 +101,7 @@ public:
  */
 template <typename BaseDType, typename BaseIType>
 inline __attribute__((always_inline)) 
-void ConstBzFieldHelixStepper::DoStep(
+void ConstBzFieldStepper::DoStep(
     BaseDType const &   x0,   BaseDType const &  y0,     BaseDType const &  z0, 
     BaseDType const &  dx0,   BaseDType const & dy0,     BaseDType const & dz0, 
     BaseIType const & charge, BaseDType const &momentum, BaseDType const &step, 
@@ -138,7 +141,7 @@ void ConstBzFieldHelixStepper::DoStep(
  SW: commented out due to explicit Vc dependence and since it is not currently used
      leaving the code here to show how one would dispatch to the kernel with Vc
 #define _R_ __restrict__
-void ConstBzFieldHelixStepper::DoStep_v(
+void ConstBzFieldStepper::DoStep_v(
                       double const * _R_ posx, double const * _R_ posy, double const * _R_ posz,
                       double const * _R_ dirx, double const * _R_ diry, double const * _R_ dirz,
                       int const * _R_ charge, double const * _R_ momentum, double const * _R_ step,
@@ -193,4 +196,4 @@ void ConstBzFieldHelixStepper::DoStep_v(
 // } // namespace GEANT_IMPL_NAMESPACE
 // } // namespace geant
 
-#endif /* CONSTBzFIELDHELIXSTEPPER_H_ */
+#endif /* CONSTBzFIELDSTEPPER_H_ */
