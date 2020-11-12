@@ -1,18 +1,23 @@
 /*
- * ConstFieldHelixStepper.h
+ * ConstBzFieldHelixStepper.h
  *
- *  Created on: Apr 23, 2014
- *      Author: swenzel
+ *  Copied/adapted from GeantV ConstBzFieldHelixStepper.h
+ *     J. Apostolakis,  11 Nov 2020
+ * 
+ *  Original Author: swenzel   ( S. Wenzel ) Apr 23, 2014
  */
 
 #ifndef CONSTBzFIELDHELIXSTEPPER_H_
 #define CONSTBzFIELDHELIXSTEPPER_H_
 
-#include <Geant/Config.h>
-#include <Geant/VectorTypes.h>
+// #include <Geant/Config.h>
+#include "VecGeom/base/Global.h"
+// #include <Geant/VectorTypes.h>
+#include "VecGeom/base/Vector3D.h"
+//  Later change to <>
 
-namespace geant {
-inline namespace GEANT_IMPL_NAMESPACE {
+//namespace geant {
+// inline namespace GEANT_IMPL_NAMESPACE {
 
 /**
  * A very simple stepper treating the propagation of particles in a constant Bz magnetic field
@@ -92,10 +97,14 @@ public:
  * output: new position, new direction of particle
  */
 template <typename BaseDType, typename BaseIType>
-inline __attribute__((always_inline)) void ConstBzFieldHelixStepper::DoStep(
-    BaseDType const &x0, BaseDType const &y0, BaseDType const &z0, BaseDType const &dx0, BaseDType const &dy0,
-    BaseDType const &dz0, BaseIType const &charge, BaseDType const &momentum, BaseDType const &step, BaseDType &x,
-    BaseDType &y, BaseDType &z, BaseDType &dx, BaseDType &dy, BaseDType &dz) const
+inline __attribute__((always_inline)) 
+void ConstBzFieldHelixStepper::DoStep(
+    BaseDType const &   x0,   BaseDType const &  y0,     BaseDType const &  z0, 
+    BaseDType const &  dx0,   BaseDType const & dy0,     BaseDType const & dz0, 
+    BaseIType const & charge, BaseDType const &momentum, BaseDType const &step, 
+    BaseDType &  x, BaseDType &  y, BaseDType &  z, 
+    BaseDType & dx, BaseDType & dy, BaseDType & dz
+    ) const
 {
   const double kB2C_local = -0.299792458e-3;
   const double kSmall     = 1.E-30;
@@ -181,7 +190,7 @@ void ConstBzFieldHelixStepper::DoStep_v(
 // TODO: above stepper is tailored/specialized to B=(0,0,Bz) in the global frame of reference
 // might need to provide more general class in which the constant field has arbitrary direction
 
-} // namespace GEANT_IMPL_NAMESPACE
-} // namespace geant
+// } // namespace GEANT_IMPL_NAMESPACE
+// } // namespace geant
 
-#endif /* CONSTFIELDHELIXSTEPPER_H_ */
+#endif /* CONSTBzFIELDHELIXSTEPPER_H_ */
