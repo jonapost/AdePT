@@ -59,6 +59,8 @@ __global__ void moveInField(adept::BlockData<SimpleTrack> *block,
 
   SimpleTrack &track= (*block)[particle_index];
   float  step= (*stepSize)[particle_index];
+
+  // Charge for e+ / e-  only    ( gamma / other neutrals also ok.) 
   int    charge = (track.pdg == -11) - (track.pdg == 11);
   // float pclPosition[3]   
   // Vector3D<float> pclPosition( track.position[0], track.position[1], track.position[2] );
@@ -88,6 +90,10 @@ __global__ void moveInField(adept::BlockData<SimpleTrack> *block,
                   track.direction[0], track.direction[1], track.direction[2],
                   charge, momentumMag, step,
                   xOut, yOut, zOut, dirX, dirY, dirZ );
+  // Alternative: load into local variables ?
+  // float xIn= track.position[0], yIn= track.position[1], zIn = track.position[2];
+  // float dirXin= track.direction[0], dirYin = track.direction[1], dirZin = track.direction[2];
+
   // helixBz.DoStep( ); 
 
   // Update position, direction
