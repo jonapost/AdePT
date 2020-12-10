@@ -26,16 +26,16 @@ list(APPEND ADEPT_CUDA_SRCS
 )
 
 # library used for fieldStepExe.cpp
-add_library(field_step_culib ${ADEPT_CUDA_SRCS})
-target_include_directories(field_step_culib PUBLIC
-  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>
-  $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}>
-  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-  $<INSTALL_INTERFACE:base>  
-  )
-target_link_libraries(field_step_culib VecCore::VecCore VecGeom::vecgeom VecGeom::vecgeomcuda_static CopCore::CopCore)
-target_compile_options(field_step_culib PRIVATE "$<$<AND:$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>,$<COMPILE_LANGUAGE:CUDA>>:-G;-src-in-ptx>")
-set_target_properties(field_step_culib PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+#add_library(field_step_culib ${ADEPT_CUDA_SRCS})
+#target_include_directories(field_step_culib PUBLIC
+#  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>
+#  $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}>
+#  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+#  $<INSTALL_INTERFACE:base>  
+#  )
+# target_link_libraries(field_step_culib VecCore::VecCore VecGeom::vecgeom VecGeom::vecgeomcuda_static CopCore::CopCore)
+# target_compile_options(field_step_culib PRIVATE "$<$<AND:$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>,$<COMPILE_LANGUAGE:CUDA>>:-G;-src-in-ptx>")
+# set_target_properties(field_step_culib PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 
 #exec fieldStepExe
 add_executable(fieldStepExe field_step.cu)
@@ -44,7 +44,8 @@ target_include_directories(fieldStepExe PUBLIC
   $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/base/inc>
   $<INSTALL_INTERFACE:base>
 )
-target_link_libraries(fieldStepExe VecCore::VecCore VecGeom::vecgeom VecGeom::vecgeomcuda VecGeom::vgdml field_step_culib CopCore::CopCore)
+target_link_libraries(fieldStepExe VecCore::VecCore VecGeom::vecgeom VecGeom::vecgeomcuda VecGeom::vgdml # field_step_culib
+                                   CopCore::CopCore)
 target_compile_options(fieldStepExe PRIVATE "$<$<AND:$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>,$<COMPILE_LANGUAGE:CUDA>>:-G;-src-in-ptx>")
 set_target_properties(fieldStepExe PROPERTIES CUDA_SEPARABLE_COMPILATION ON CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
