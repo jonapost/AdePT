@@ -24,6 +24,8 @@ struct SimpleTrack {
   bool     flag2;
 };
 
+using  TrackBlock_t    = adept::BlockData<SimpleTrack>;
+
 template<unsigned int N>
 struct FieldPropagationBuffer
 {
@@ -60,9 +62,9 @@ __device__ void initOneTrack(int            index,
   constexpr  int  pdgElec = 11 , pdgGamma = 22;
   track.pdg = ( r < 0.45 ? pdgElec : ( r< 0.9 ? pdgGamma : -pdgElec ) );
 
-  track.position[0] = minX + curand_uniform(states) * ( maxX - minX );
-  track.position[1] = minY + curand_uniform(states) * ( maxY - minY );
-  track.position[2] = minZ + curand_uniform(states) * ( maxZ - minZ );
+  track.position[0] = 0;   // minX + curand_uniform(states) * ( maxX - minX );
+  track.position[1] = 1.0; // minY + curand_uniform(states) * ( maxY - minY );
+  track.position[2] = 2.0; // minZ + curand_uniform(states) * ( maxZ - minZ );
 
   floatE_t  px, py, pz;
   px = maxP * 2.0 * ( curand_uniform(states) - 0.5 );   // -maxP to +maxP
@@ -175,45 +177,85 @@ __global__ void moveInField(adept::BlockData<SimpleTrack> *trackBlock,
   track.direction[2] = dirZ;
 }
 
+void reportTracks( TrackBlock_t* trackBlock, unsigned int numTracks )
+{
+  // unsigned int sizeOfTrack = TrackBlock_t::SizeOfAlignAware;
+  // size_t  bytesForTracks   = TrackBlock_t::SizeOfInstance(numTracks);
+  // mallocManaged(&buffer2, blocksize);
+  
+  // SimpleTrack tracksEnd_host[SmallNum];
+  // cudaMemcpy(tracksEnd_host, trackBlock_dev, SmallNum * sizeOfTrack, // sizeof(SimpleTrack),
+  //            cudaMemcpyDeviceToHost );
+
+  for( int i = 0; i<numTracks ; i++) {
+     auto track = (*trackBlock)[i]; // tracksEnd_host[i];
+     std::cout << " Track " << i << " pdg = " << track.pdg
+               << " x,y,z = " << track.position[0] << " , " << track.position[1]
+               << " , " << track.position[3] << std::endl;
+  }
+}
+
 int main()
 {
-  constexpr int numBlocks=1, numThreads=1;
-  int  numTracks = 2;
+  constexpr int numBlocks=1, numThreads=2;
+  int  numTracks = numThreads;
   
   // Initialize Curand
   curandState_t *randState;
 
+  std::cout << " Initialising curand." << std::endl;
   cudaMalloc((void **)&randState, sizeof(curandState_t));
   initCurand<<<numBlocks, numThreads>>>(randState);
   cudaDeviceSynchronize();
   
   // Track capacity of the block
-  constexpr int capacity = 1 << 20;
+  constexpr int capacity = 1 << 16;
 
+  // 1. Create container of Tracks  BlockData<SimpleTrack>
+  // -----------------------------------------------------
+  std::cout << " Creating track buffer for " << capacity << " tracks -" // " on GPU device."
+            << " in Unified Memory." 
+            << std::endl;
+  
   // Allocate a block of tracks with capacity larger than the total number of spawned threads
   // Note that if we want to allocate several consecutive block in a buffer, we have to use
   // Block_t::SizeOfAlignAware rather than SizeOfInstance to get the space needed per block
-  using Block_t    = adept::BlockData<SimpleTrack>;
-  size_t blocksize = Block_t::SizeOfInstance(capacity);
+  size_t blocksize = TrackBlock_t::SizeOfInstance(capacity);
   char *buffer2    = nullptr;
-  cudaMallocManaged(&buffer2, blocksize);
-  auto trackBlock = Block_t::MakeInstanceAt(capacity, buffer2);
+  cudaError_t allocErr= cudaMallocManaged(&buffer2, blocksize);  // Allocated in Unified memory ... (baby steps)
+  auto trackBlock_dev = TrackBlock_t::MakeInstanceAt(capacity, buffer2);
 
-  initTracks<<<numBlocks, numThreads>>>(trackBlock, randState, numTracks);
+  // 2.  Initialise track - on device
+  // --------------------------------
+  std::cout << " Initialising tracks." << std::endl;
+  
+  initTracks<<<numBlocks, numThreads>>>(trackBlock_dev, randState, numTracks);
   cudaDeviceSynchronize();
 
-  moveInField<<<numBlocks, numThreads>>>(trackBlock, numTracks);
-
+  const unsigned int SmallNum= std::max( 2, numTracks);
+  // SimpleTrack tracksStart_host[SmallNum];
+  
+  // cudaMemcpy(tracksStart_host, trackBlock_dev, SmallNum*sizeof(SimpleTrack), cudaMemcpyDeviceToHost );
+  for( int i = 0; i<SmallNum ; i++){
+     // (*block)[particle_index].energy = energy;     
+     auto track = (*trackBlock_dev)[i];
+     std::cout << " Track " << i << " pdg = " << track.pdg
+               << " x,y,z = " << track.position[0] << " , " << track.position[1]
+               << " , " << track.position[3] << std::endl;
+  }
+  
+  // 3.  Move tracks in field - for one step
+  // ----------------------------------------
+  std::cout << " Calling move in field." << std::endl;
+  
+  moveInField<<<numBlocks, numThreads>>>(trackBlock_dev, numTracks);
+  //*********
+  
   cudaDeviceSynchronize();
-  // See where they went ?
 
-  constexpr unsigned int SmallNum= 2;
-  SimpleTrack tracksHost[SmallNum];
-  cudaMemcpy(tracksHost, trackBlock, SmallNum*sizeof(SimpleTrack), cudaMemcpyDeviceToHost );
-
-  for( int i = 0; i<SmallNum ; i++)
-     std::cout << " Track " << i << " arrived at x,y,z = " << tracksHost[i].position[0] << " , " << tracksHost[i].position[1]
-               << " , " << tracksHost[i].position[3] << std::endl;
-  // delete[] tracksHost;
+  // 4.  Report result of movement
+  // 
+  //          See where they went ?
+  reportTracks( trackBlock_dev, numTracks );
 }
 
