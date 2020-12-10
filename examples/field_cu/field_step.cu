@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: 2020 CERN
 // SPDX-License-Identifier: Apache-2.0
 
-// Author: J. Apostoalakis  12 Nov 2020
-
-#include <AdePT/BlockData.h>
+// Author: J. Apostolakis  12 Nov 2020
 
 #include <CopCore/SystemOfUnits.h>
 #include <CopCore/PhysicalConstants.h>
+
+#include <AdePT/BlockData.h>
 
 #include "ConstBzFieldStepper.h"
 
@@ -19,6 +19,7 @@ struct SimpleTrack {
   floatE_t kineticEnergy{0};
   floatX_t position[3]{0};
   floatX_t direction[3]{0};
+  floatX_t stepSize;    // Current step size 
   bool     flag1;
   bool     flag2;
 };
@@ -35,35 +36,50 @@ struct FieldPropagationBuffer
 
 constexpr float ElectronMass = copcore::units::kElectronMassC2;
 
+using copcore::units::kElectronMassC2;
+
+using copcore::units::meter;
+using copcore::units::GeV;
+
 constexpr floatX_t  minX = -2.0 * meter, maxX = 2.0 * meter;
 constexpr floatX_t  minY = -3.0 * meter, maxY = 3.0 * meter;
 constexpr floatX_t  minZ = -5.0 * meter, maxZ = 5.0 * meter;
 
 constexpr floatE_t  maxP = 1.0 * GeV;
 
-__device__ void initOneTrack(int index,   SimpleTrack &track )
+#include <curand.h>
+#include <curand_kernel.h>
+
+__device__ void initOneTrack(int            index,
+                             SimpleTrack   &track,
+                             curandState_t *states
+   )
 {
-  float  r = curand(); 
+  float r = curand_uniform(states);  
   // track.charge = ( r < 0.45 ? -1 : ( r< 0.9 ? 0 : +1 ) );
-  constexpr  int  pgdElec = 11 , pdgGamma = 22;
+  constexpr  int  pdgElec = 11 , pdgGamma = 22;
   track.pdg = ( r < 0.45 ? pdgElec : ( r< 0.9 ? pdgGamma : -pdgElec ) );
 
-  track.position[0] = minX + curand() * ( maxX - minX );
-  track.position[1] = minY + curand() * ( maxY - minY );
-  track.position[2] = minZ + curand() * ( maxZ - minZ );
+  track.position[0] = minX + curand_uniform(states) * ( maxX - minX );
+  track.position[1] = minY + curand_uniform(states) * ( maxY - minY );
+  track.position[2] = minZ + curand_uniform(states) * ( maxZ - minZ );
 
   floatE_t  px, py, pz;
-  px = maxP * 2.0 * ( curand() - 0.5 );   // -maxP to +maxP
-  py = maxP * 2.0 * ( curand() - 0.5 );
-  pz = maxP * 2.0 * ( curand() - 0.5 );
+  px = maxP * 2.0 * ( curand_uniform(states) - 0.5 );   // -maxP to +maxP
+  py = maxP * 2.0 * ( curand_uniform(states) - 0.5 );
+  pz = maxP * 2.0 * ( curand_uniform(states) - 0.5 );
 
   floatE_t  pmag2 =  px*px + py*py + pz*pz;
   floatE_t  inv_pmag = 1.0 * sqrt(pmag2);
   track.direction[0] = px * inv_pmag; 
-  track.direction[1] = pY * inv_pmag; 
-  track.direction[2] = pZ * inv_pmag;
+  track.direction[1] = py * inv_pmag; 
+  track.direction[2] = pz * inv_pmag;
 
-  floatE_t  mass = ( pdg == pdgGamma ) ?  0.0 : kElectronMassC2 ; // rest mass
+  constexpr floatX_t maxStepSize = 0.25 * ( (maxX - minX) + (maxY - minY) + (maxZ - minZ) );
+  
+  track.stepSize = curand_uniform(states) * maxStepSize;
+  
+  floatE_t  mass = ( track.pdg == pdgGamma ) ?  0.0 : kElectronMassC2 ; // rest mass
   track.kineticEnergy = pmag2 / ( sqrt( mass * mass + pmag2 ) + mass);
 }
 
@@ -71,7 +87,8 @@ __device__ void initOneTrack(int index,   SimpleTrack &track )
 //     .. the particles' state ?
 
 __global__ void initTracks(adept::BlockData<SimpleTrack> *trackBlock,
-                           adept::BlockData<floatX_t>    *stepSize
+                           curandState_t *states,
+                           int maxIndex
                           )
 {
   /* initialize the tracks with random particles */
@@ -80,7 +97,7 @@ __global__ void initTracks(adept::BlockData<SimpleTrack> *trackBlock,
 
   SimpleTrack* pTrack =   trackBlock->NextElement();
 
-  initOneTrack( pclIdx, *pTrack);
+  initOneTrack( pclIdx, *pTrack, states);
 }
 
 __global__ void initCurand(curandState_t *states)
@@ -90,7 +107,7 @@ __global__ void initCurand(curandState_t *states)
 }
 
 
-constexpr float BzValue = 0.1 * copcore::units::Tesla ; 
+constexpr float BzValue = 0.1 * copcore::units::tesla; 
 
 // VECCORE_ATT_HOST_DEVICE
 __host__  __device__ 
@@ -103,16 +120,15 @@ void EvaluateField( const floatX_t position[3], float fieldValue[3] )
 
 // V1 -- one per warp
 __global__ void moveInField(adept::BlockData<SimpleTrack> *trackBlock,
-                            adept::BlockData<floatX_t>   *stepSize,
                             int maxIndex)
 {
   int pclIdx = blockIdx.x * blockDim.x + threadIdx.x;
   SimpleTrack &track= (*trackBlock)[pclIdx];
 
   // check if you are not outside the used block
-  if (pclIdx >= maxIndex || !track.active ) return;
+  if (pclIdx >= maxIndex ) return;  // || !track.active ) return;
  
-  float  step= (*stepSize)[pclIdx];
+  floatX_t  step= track.stepSize;
 
   // Charge for e+ / e-  only    ( gamma / other neutrals also ok.) 
   int    charge = (track.pdg == -11) - (track.pdg == 11);
@@ -124,7 +140,7 @@ __global__ void moveInField(adept::BlockData<SimpleTrack> *trackBlock,
 
   // float restMass = ElectronMass;  // For now ... 
   float kinE = track.kineticEnergy;
-  float momentumMag = sqrt( kinE * ( kinE + 2.0 * ElectronMass) );
+  floatE_t momentumMag = sqrt( kinE * ( kinE + 2.0 * ElectronMass) );
   
   // Collect position, momentum
   // float momentum[3] = { momentumMag * track.direction[0], 
@@ -134,7 +150,7 @@ __global__ void moveInField(adept::BlockData<SimpleTrack> *trackBlock,
   //                      track.direction[1], 
   //                      track.direction[2] ); 
 
-  float xOut, yOut, zOut, dirX, dirY, dirZ;
+  floatX_t xOut, yOut, zOut, dirX, dirY, dirZ;
 
   ConstBzFieldStepper  helixBz(BzValue);
 
@@ -161,35 +177,43 @@ __global__ void moveInField(adept::BlockData<SimpleTrack> *trackBlock,
 
 int main()
 {
+  constexpr int numBlocks=1, numThreads=1;
+  int  numTracks = 2;
+  
   // Initialize Curand
-  curandState_t *state;
-  cudaMalloc((void **)&state, sizeof(curandState_t));
-  init<<<1, 1>>>(state);
-  cudaDeviceSynchronize();
+  curandState_t *randState;
 
+  cudaMalloc((void **)&randState, sizeof(curandState_t));
+  initCurand<<<numBlocks, numThreads>>>(randState);
+  cudaDeviceSynchronize();
+  
   // Track capacity of the block
   constexpr int capacity = 1 << 20;
 
   // Allocate a block of tracks with capacity larger than the total number of spawned threads
   // Note that if we want to allocate several consecutive block in a buffer, we have to use
   // Block_t::SizeOfAlignAware rather than SizeOfInstance to get the space needed per block
-  using Block_t    = adept::BlockData<MyTrack>;
+  using Block_t    = adept::BlockData<SimpleTrack>;
   size_t blocksize = Block_t::SizeOfInstance(capacity);
   char *buffer2    = nullptr;
   cudaMallocManaged(&buffer2, blocksize);
-  auto block = Block_t::MakeInstanceAt(capacity, buffer2);
+  auto trackBlock = Block_t::MakeInstanceAt(capacity, buffer2);
 
+  initTracks<<<numBlocks, numThreads>>>(trackBlock, randState, numTracks);
+  cudaDeviceSynchronize();
 
+  moveInField<<<numBlocks, numThreads>>>(trackBlock, numTracks);
 
-// V2 -- a work does work of more > 1
-//
-// kernel function that does transportation
-__global__ void transport(int n, adept::BlockData<MyTrack> *block, curandState_t *states, Queue_t *queues)
-{
-  for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x) {
-    // transport particles
-    for (int xyz = 0; xyz < 3; xyz++) {
-      (*block)[i].pos[xyz] = (*block)[i].pos[xyz] + (*block)[i].energy * (*block)[i].dir[xyz];
-    }
-  }
+  cudaDeviceSynchronize();
+  // See where they went ?
+
+  constexpr unsigned int SmallNum= 2;
+  SimpleTrack tracksHost[SmallNum];
+  cudaMemcpy(tracksHost, trackBlock, SmallNum*sizeof(SimpleTrack), cudaMemcpyDeviceToHost );
+
+  for( int i = 0; i<SmallNum ; i++)
+     std::cout << " Track " << i << " arrived at x,y,z = " << tracksHost[i].position[0] << " , " << tracksHost[i].position[1]
+               << " , " << tracksHost[i].position[3] << std::endl;
+  // delete[] tracksHost;
 }
+
