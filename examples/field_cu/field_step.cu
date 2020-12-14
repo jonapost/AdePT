@@ -3,6 +3,9 @@
 
 // Author: J. Apostolakis  12 Nov 2020
 
+#include <cstdio>
+#include <iomanip>
+
 #include <CopCore/SystemOfUnits.h>
 #include <CopCore/PhysicalConstants.h>
 
@@ -36,18 +39,19 @@ struct FieldPropagationBuffer
   bool     active[N];
 };
 
-constexpr float ElectronMass = copcore::units::kElectronMassC2;
-
 using copcore::units::kElectronMassC2;
 
 using copcore::units::meter;
 using copcore::units::GeV;
+using copcore::units::MeV;
 
 constexpr floatX_t  minX = -2.0 * meter, maxX = 2.0 * meter;
 constexpr floatX_t  minY = -3.0 * meter, maxY = 3.0 * meter;
 constexpr floatX_t  minZ = -5.0 * meter, maxZ = 5.0 * meter;
 
-constexpr floatE_t  maxP = 1.0 * GeV;
+// constexpr floatE_t  maxP = 1.0 * GeV;
+
+constexpr floatX_t maxStepSize = 0.1 * ( (maxX - minX) + (maxY - minY) + (maxZ - minZ) );
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -62,24 +66,22 @@ __device__ void initOneTrack(int            index,
   constexpr  int  pdgElec = 11 , pdgGamma = 22;
   track.pdg = ( r < 0.45 ? pdgElec : ( r< 0.9 ? pdgGamma : -pdgElec ) );
 
-  track.position[0] = 0;   // minX + curand_uniform(states) * ( maxX - minX );
-  track.position[1] = 1.0; // minY + curand_uniform(states) * ( maxY - minY );
-  track.position[2] = 2.0; // minZ + curand_uniform(states) * ( maxZ - minZ );
+  track.position[0] = 0.0;   // minX + curand_uniform(states) * ( maxX - minX );
+  track.position[1] = 0.0; // minY + curand_uniform(states) * ( maxY - minY );
+  track.position[2] = 0.0; // minZ + curand_uniform(states) * ( maxZ - minZ );
 
   floatE_t  px, py, pz;
-  px = maxP * 2.0 * ( curand_uniform(states) - 0.5 );   // -maxP to +maxP
-  py = maxP * 2.0 * ( curand_uniform(states) - 0.5 );
-  pz = maxP * 2.0 * ( curand_uniform(states) - 0.5 );
+  px = 4 * MeV ; // maxP * 2.0 * ( curand_uniform(states) - 0.5 );   // -maxP to +maxP
+  py = 0; // maxP * 2.0 * ( curand_uniform(states) - 0.5 );
+  pz = 3 * MeV ; // maxP * 2.0 * ( curand_uniform(states) - 0.5 );
 
   floatE_t  pmag2 =  px*px + py*py + pz*pz;
-  floatE_t  inv_pmag = 1.0 * sqrt(pmag2);
+  floatE_t  inv_pmag = 1.0 / std::sqrt(pmag2);
   track.direction[0] = px * inv_pmag; 
   track.direction[1] = py * inv_pmag; 
   track.direction[2] = pz * inv_pmag;
 
-  constexpr floatX_t maxStepSize = 0.25 * ( (maxX - minX) + (maxY - minY) + (maxZ - minZ) );
-  
-  track.stepSize = curand_uniform(states) * maxStepSize;
+  track.stepSize = 0.001 * index * maxStepSize ; // curand_uniform(states) * maxStepSize;
   
   floatE_t  mass = ( track.pdg == pdgGamma ) ?  0.0 : kElectronMassC2 ; // rest mass
   track.kineticEnergy = pmag2 / ( sqrt( mass * mass + pmag2 ) + mass);
@@ -99,13 +101,24 @@ __global__ void initTracks(adept::BlockData<SimpleTrack> *trackBlock,
 
   SimpleTrack* pTrack =   trackBlock->NextElement();
 
-  initOneTrack( pclIdx, *pTrack, states);
+  initOneTrack( pclIdx, *pTrack, &states[pclIdx] );
 }
 
-__global__ void initCurand(curandState_t *states)
+__global__ void initCurand(unsigned long long runSeed, curandState_t *states)
 {
   /* initialize the state */
-  curand_init(0, 0, 0, states);
+  int id = threadIdx.x + blockIdx.x * blockDim.x;
+  /* All threads gets the same seed, a different sequence number, no offset */
+  curand_init(runSeed, id, 0, &states[id]);
+}
+  
+
+__global__ void setup_kernel(curandState *state)
+{
+    int id = threadIdx.x + blockIdx.x * blockDim.x;
+    /* Each thread gets same seed, a different sequence
+       number, no offset */
+    curand_init(1234, id, 0, &state[id]);
 }
 
 
@@ -120,53 +133,61 @@ void EvaluateField( const floatX_t position[3], float fieldValue[3] )
     fieldValue[2]= BzValue;        
 }
 
-// V1 -- one per warp
-__global__ void moveInField(adept::BlockData<SimpleTrack> *trackBlock,
-                            int maxIndex)
-{
-  int pclIdx = blockIdx.x * blockDim.x + threadIdx.x;
-  SimpleTrack &track= (*trackBlock)[pclIdx];
+#ifdef USE_VECTOR3D
+#include <VecGeom/Vector3D.h>
+#endif
 
-  // check if you are not outside the used block
-  if (pclIdx >= maxIndex ) return;  // || !track.active ) return;
- 
+__host__ __device__
+void moveInField(SimpleTrack& track)
+{
   floatX_t  step= track.stepSize;
 
   // Charge for e+ / e-  only    ( gamma / other neutrals also ok.) 
   int    charge = (track.pdg == -11) - (track.pdg == 11);
-  // double pclPosition[3]   
-  // Vector3D<double> pclPosition( track.position[0], track.position[1], track.position[2] );
+  
+  if ( charge == 0.0 ) return;
+  
+  // floatX_t pclPosition[3];
 
   // Evaluate initial field value
-  // EvaluateField( pclPosition, fieldVector );
+  // EvaluateField( pclPosition3d, fieldVector );
 
   // float restMass = ElectronMass;  // For now ... 
-  float kinE = track.kineticEnergy;
-  floatE_t momentumMag = sqrt( kinE * ( kinE + 2.0 * ElectronMass) );
+  floatE_t kinE = track.kineticEnergy;
+  floatE_t momentumMag = sqrt( kinE * ( kinE + 2.0 * kElectronMassC2) );
   
   // Collect position, momentum
-  // float momentum[3] = { momentumMag * track.direction[0], 
-  //                       momentumMag * track.direction[1], 
-  //                       momentumMag * track.direction[2] } ;
-  // Vector3D<float> dir( track.direction[0], 
-  //                      track.direction[1], 
-  //                      track.direction[2] ); 
-
-  floatX_t xOut, yOut, zOut, dirX, dirY, dirZ;
-
+  // floatE_t momentum[3] = { momentumMag * track.direction[0], 
+  //                          momentumMag * track.direction[1], 
+  //                          momentumMag * track.direction[2] } ;
+#ifdef VECTOR3D    
+  vecGeom::Vector3D<floatX_t> pclPosition3d( track.position[0], track.position[1], track.position[2] );
+  Vector3D<floatX_t> pclDirection3d( track.direction[0], 
+                                     track.direction[1], 
+                                     track.direction[2] );
+  Vector3D<floatX_t> positionOut3d(  pclPosition3d );
+  Vector3D<floatX_t> directionOut3d( pclDirection3d );  
+#endif
+  
   ConstBzFieldStepper  helixBz(BzValue);
+
+#if 0    
+  track.position[0] += 0.1 * ( 1. + 0.0001 * step );
+  track.position[1] += 0.2;
+  track.position[2] += 0.3;
+  track.direction[0] += 0.3;
+  track.direction[1] += 0.2;
+  track.direction[2] += 0.1;
+#endif    
 
   // For now all particles ( e-, e+, gamma ) can be propagated using this
   //   for gammas  charge = 0 works, and ensures that it goes straight.
+#ifndef USE_VECTOR3D
+  floatX_t xOut, yOut, zOut, dirX, dirY, dirZ;  
   helixBz.DoStep( track.position[0], track.position[1], track.position[2],
                   track.direction[0], track.direction[1], track.direction[2],
                   charge, momentumMag, step,
-                  xOut, yOut, zOut, dirX, dirY, dirZ );
-  // Alternative: load into local variables ?
-  // float xIn= track.position[0], yIn= track.position[1], zIn = track.position[2];
-  // float dirXin= track.direction[0], dirYin = track.direction[1], dirZin = track.direction[2];
-
-  // helixBz.DoStep( ); 
+                  xOut, yOut, zOut, dirX, dirY, dirZ );                  
 
   // Update position, direction
   track.position[0] = xOut;
@@ -174,7 +195,58 @@ __global__ void moveInField(adept::BlockData<SimpleTrack> *trackBlock,
   track.position[2] = zOut;
   track.direction[0] = dirX;
   track.direction[1] = dirY;
-  track.direction[2] = dirZ;
+  track.direction[2] = dirZ;  
+#else  
+  helixBz.DoStep( pclPosition3d, pclDirection3d, charge, momentumMag, step,
+                  positionOut3d, directionOut3d);
+
+  // Update position, direction
+  track.position[0] = positionOut3d[0];
+  track.position[1] = positionOut3d[1];
+  track.position[2] = positionOut3d[2];
+  track.direction[0] = directionOut3d[0];
+  track.direction[1] = directionOut3d[1];
+  track.direction[2] = directionOut3d[2];
+#endif
+
+  // Alternative: load into local variables ?
+  // float xIn= track.position[0], yIn= track.position[1], zIn = track.position[2];
+  // float dirXin= track.direction[0], dirYin = track.direction[1], dirZin = track.direction[2];
+
+
+}
+
+// V1 -- one per warp
+__global__ void moveInField_glob(adept::BlockData<SimpleTrack> *trackBlock,
+                            int maxIndex)
+{
+  int pclIdx = blockIdx.x * blockDim.x + threadIdx.x;
+  SimpleTrack &track= (*trackBlock)[pclIdx];
+
+  // check if you are not outside the used block
+  if (pclIdx >= maxIndex ) return;  // || !track.active ) return;
+
+  moveInField(track);  
+}
+
+void reportOneTrack( const SimpleTrack & track, int id = -1 )
+{
+   using std::setw;
+   
+   std::cout << " Track " << setw(4) << id
+             << " addr= " << & track   << " "
+             << " pdg = " << setw(4) << track.pdg
+             << " x,y,z = "
+             << setw(12) << track.position[0] << " , "
+             << setw(12) << track.position[1] << " , "
+             << setw(12) << track.position[2]
+             << " step = " << setw( 12 ) << track.stepSize
+             << " kinE = " << setw( 10 ) << track.kineticEnergy
+             << " Dir-x,y,z = "
+             << setw(12) << track.direction[0] << " , "
+             << setw(12) << track.direction[1] << " , "
+             << setw(12) << track.direction[2]
+             << std::endl;
 }
 
 void reportTracks( TrackBlock_t* trackBlock, unsigned int numTracks )
@@ -187,27 +259,37 @@ void reportTracks( TrackBlock_t* trackBlock, unsigned int numTracks )
   // cudaMemcpy(tracksEnd_host, trackBlock_dev, SmallNum * sizeOfTrack, // sizeof(SimpleTrack),
   //            cudaMemcpyDeviceToHost );
 
+  // std::cout << " TrackBlock addr= " << trackBlock   << " " << std::endl;
   for( int i = 0; i<numTracks ; i++) {
-     auto track = (*trackBlock)[i]; // tracksEnd_host[i];
-     std::cout << " Track " << i << " pdg = " << track.pdg
-               << " x,y,z = " << track.position[0] << " , " << track.position[1]
-               << " , " << track.position[3] << std::endl;
+     SimpleTrack& track = (*trackBlock)[i];
+     reportOneTrack( track, i );
   }
 }
 
 int main()
 {
-  constexpr int numBlocks=1, numThreads=2;
-  int  numTracks = numThreads;
+  constexpr int numBlocks=2, numThreadsPerBlock=4;
+  int  totalNumThreads = numBlocks * numThreadsPerBlock;
+  
+  const int numTracks = totalNumThreads; // Constant at first ...
+  
+  std::cout << " Bz = " << BzValue / copcore::units::tesla << " T " << std::endl;
   
   // Initialize Curand
-  curandState_t *randState;
+  //   How-to see: https://docs.nvidia.com/cuda/curand/device-api-overview.html
 
-  std::cout << " Initialising curand." << std::endl;
-  cudaMalloc((void **)&randState, sizeof(curandState_t));
-  initCurand<<<numBlocks, numThreads>>>(randState);
+  curandState_t *randState_dev;
+  auto cudErr= cudaMalloc((void **)&randState_dev,
+                          totalNumThreads * sizeof(curandState_t));
+
+  // curandStateMRG32k3a_t  *devMRGStates;
+
+  unsigned long long runSeed = 12345; 
+  std::cout << " Initialising curand with run seed = ." << runSeed << std::endl;
+
+  initCurand<<<numBlocks, numThreadsPerBlock>>>(runSeed, randState_dev);
   cudaDeviceSynchronize();
-  
+
   // Track capacity of the block
   constexpr int capacity = 1 << 16;
 
@@ -223,39 +305,60 @@ int main()
   size_t blocksize = TrackBlock_t::SizeOfInstance(capacity);
   char *buffer2    = nullptr;
   cudaError_t allocErr= cudaMallocManaged(&buffer2, blocksize);  // Allocated in Unified memory ... (baby steps)
-  auto trackBlock_dev = TrackBlock_t::MakeInstanceAt(capacity, buffer2);
+
+  // auto trackBlock_dev  = TrackBlock_t::MakeInstanceAt(capacity, buffer2);  
+  auto trackBlock_uniq = TrackBlock_t::MakeInstanceAt(capacity, buffer2);
 
   // 2.  Initialise track - on device
   // --------------------------------
   std::cout << " Initialising tracks." << std::endl;
-  
-  initTracks<<<numBlocks, numThreads>>>(trackBlock_dev, randState, numTracks);
+  std::cout << " Max step size = " << maxStepSize << std::endl;
+
+  initTracks<<<numBlocks, numThreadsPerBlock>>>(trackBlock_uniq, randState_dev, numTracks);
   cudaDeviceSynchronize();
 
   const unsigned int SmallNum= std::max( 2, numTracks);
   // SimpleTrack tracksStart_host[SmallNum];
   
-  // cudaMemcpy(tracksStart_host, trackBlock_dev, SmallNum*sizeof(SimpleTrack), cudaMemcpyDeviceToHost );
-  for( int i = 0; i<SmallNum ; i++){
-     // (*block)[particle_index].energy = energy;     
-     auto track = (*trackBlock_dev)[i];
-     std::cout << " Track " << i << " pdg = " << track.pdg
-               << " x,y,z = " << track.position[0] << " , " << track.position[1]
-               << " , " << track.position[3] << std::endl;
-  }
-  
+  // cudaMemcpy(tracksStart_host, trackBlock_uniq, SmallNum*sizeof(SimpleTrack), cudaMemcpyDeviceToHost );
+
+  std::cout << std::endl;
+  std::cout << " Initialised tracks: " << std::endl;
+  reportTracks( trackBlock_uniq, numTracks );  
+
   // 3.  Move tracks in field - for one step
   // ----------------------------------------
-  std::cout << " Calling move in field." << std::endl;
-  
-  moveInField<<<numBlocks, numThreads>>>(trackBlock_dev, numTracks);
+  std::cout << " Calling move in field (host)." << std::endl;
+  for( int i = 0; i<SmallNum ; i++){
+     // (*block)[particle_index].energy = energy;     
+     SimpleTrack& track = (*trackBlock_uniq)[i];
+     // moveInField( track );
+
+     SimpleTrack  ghostTrack = track;
+     // reportOneTrack( ghostTrack, i );
+     
+     moveInField( ghostTrack );
+     
+     // std::cout << " Track " << i << " addr = " << &track << std::endl;
+     // std::cout << " Track " << i << " pdg = " << track.pdg
+     //          << " x,y,z = " << track.position[0] << " , " << track.position[1]
+     //          << " , " << track.position[3] << std::endl;
+     reportOneTrack( ghostTrack, i );   
+  }
+  // std::cout << " Tracks moved in host: " << std::endl;
+  // reportTracks( trackBlock_uniq, numTracks );
+
+  std::cout << std::endl;
+  std::cout << " Calling move in field (device)" << std::endl;
+
+  moveInField_glob<<<numBlocks, numThreadsPerBlock>>>(trackBlock_uniq, numTracks);
   //*********
-  
-  cudaDeviceSynchronize();
+  cudaDeviceSynchronize();  
 
   // 4.  Report result of movement
   // 
   //          See where they went ?
-  reportTracks( trackBlock_dev, numTracks );
+  std::cout << " Ending tracks: " << std::endl;
+  reportTracks( trackBlock_uniq, numTracks );
 }
 
