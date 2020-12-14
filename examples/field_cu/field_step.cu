@@ -113,15 +113,6 @@ __global__ void initCurand(unsigned long long runSeed, curandState_t *states)
 }
   
 
-__global__ void setup_kernel(curandState *state)
-{
-    int id = threadIdx.x + blockIdx.x * blockDim.x;
-    /* Each thread gets same seed, a different sequence
-       number, no offset */
-    curand_init(1234, id, 0, &state[id]);
-}
-
-
 constexpr float BzValue = 0.1 * copcore::units::tesla; 
 
 // VECCORE_ATT_HOST_DEVICE
