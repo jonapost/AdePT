@@ -109,7 +109,7 @@ void ConstBzFieldStepper::DoStep(
     BaseDType & dx, BaseDType & dy, BaseDType & dz
     ) const
 {
-  const double kB2C_local = -0.299792458e-3;
+  constexpr BaseDType kB2C_local =  -0.299792458 * ( copcore::units::GeV / (copcore::units::tesla * copcore::units::meter) ) ; // -0.299792458e-3;
   const double kSmall     = 1.E-30;
   // could do a fast square root here
   BaseDType dt      = sqrt((dx0 * dx0) + (dy0 * dy0)) + kSmall;
