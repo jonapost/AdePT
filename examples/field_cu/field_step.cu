@@ -9,6 +9,11 @@
 #include <CopCore/SystemOfUnits.h>
 #include <CopCore/PhysicalConstants.h>
 
+// #include <CopCore/Ranluxpp.h>
+
+#include <VecGeom/base/Vector3D.h>
+// #include "track.h"
+
 #include <AdePT/BlockData.h>
 
 #include "ConstBzFieldStepper.h"
@@ -21,7 +26,8 @@ struct SimpleTrack {
   int      pdg{0};
   floatE_t kineticEnergy{0};
   floatX_t position[3]{0};
-  floatX_t direction[3]{0};
+  vecgeom::Vector3D<double> pos;
+  vecgeom::Vector3D<double> dir;
   floatX_t stepSize;    // Current step size 
   bool     flag1;
   bool     flag2;
@@ -66,9 +72,9 @@ __device__ void initOneTrack(int            index,
   constexpr  int  pdgElec = 11 , pdgGamma = 22;
   track.pdg = ( r < 0.45 ? pdgElec : ( r< 0.9 ? pdgGamma : -pdgElec ) );
 
-  track.position[0] = 0.0;   // minX + curand_uniform(states) * ( maxX - minX );
-  track.position[1] = 0.0; // minY + curand_uniform(states) * ( maxY - minY );
-  track.position[2] = 0.0; // minZ + curand_uniform(states) * ( maxZ - minZ );
+  track.pos[0] = 0.0;   // minX + curand_uniform(states) * ( maxX - minX );
+  track.pos[1] = 0.0; // minY + curand_uniform(states) * ( maxY - minY );
+  track.pos[2] = 0.0; // minZ + curand_uniform(states) * ( maxZ - minZ );
 
   floatE_t  px, py, pz;
   px = 4 * MeV ; // maxP * 2.0 * ( curand_uniform(states) - 0.5 );   // -maxP to +maxP
@@ -77,9 +83,9 @@ __device__ void initOneTrack(int            index,
 
   floatE_t  pmag2 =  px*px + py*py + pz*pz;
   floatE_t  inv_pmag = 1.0 / std::sqrt(pmag2);
-  track.direction[0] = px * inv_pmag; 
-  track.direction[1] = py * inv_pmag; 
-  track.direction[2] = pz * inv_pmag;
+  track.dir[0] = px * inv_pmag; 
+  track.dir[1] = py * inv_pmag; 
+  track.dir[2] = pz * inv_pmag;
 
   track.stepSize = 0.001 * index * maxStepSize ; // curand_uniform(states) * maxStepSize;
   
@@ -117,7 +123,7 @@ constexpr float BzValue = 0.1 * copcore::units::tesla;
 
 // VECCORE_ATT_HOST_DEVICE
 __host__  __device__ 
-void EvaluateField( const floatX_t position[3], float fieldValue[3] )
+void EvaluateField( const floatX_t pos[3], float fieldValue[3] )
 {
     fieldValue[0]= 0.0;
     fieldValue[1]= 0.0;
@@ -148,24 +154,20 @@ void moveInField(SimpleTrack& track)
   floatE_t momentumMag = sqrt( kinE * ( kinE + 2.0 * kElectronMassC2) );
   
   // Collect position, momentum
-  // floatE_t momentum[3] = { momentumMag * track.direction[0], 
-  //                          momentumMag * track.direction[1], 
-  //                          momentumMag * track.direction[2] } ;
+  // floatE_t momentum[3] = { momentumMag * track.dir[0], 
+  //                          momentumMag * track.dir[1], 
+  //                          momentumMag * track.dir[2] } ;
 #ifdef VECTOR3D    
-  vecGeom::Vector3D<floatX_t> pclPosition3d( track.position[0], track.position[1], track.position[2] );
-  Vector3D<floatX_t> pclDirection3d( track.direction[0], 
-                                     track.direction[1], 
-                                     track.direction[2] );
-  Vector3D<floatX_t> positionOut3d(  pclPosition3d );
-  Vector3D<floatX_t> directionOut3d( pclDirection3d );  
+  vecGeom::Vector3D<floatX_t> positionOut3d(  track.pos );
+  vecGeom::Vector3D<floatX_t> directionOut3d( track.dir );
 #endif
   
   ConstBzFieldStepper  helixBz(BzValue);
 
 #if 0    
-  track.position[0] += 0.1 * ( 1. + 0.0001 * step );
-  track.position[1] += 0.2;
-  track.position[2] += 0.3;
+  track.pos[0] += 0.1 * ( 1. + 0.0001 * step );
+  track.pos[1] += 0.2;
+  track.pos[2] += 0.3;
   track.direction[0] += 0.3;
   track.direction[1] += 0.2;
   track.direction[2] += 0.1;
@@ -175,29 +177,31 @@ void moveInField(SimpleTrack& track)
   //   for gammas  charge = 0 works, and ensures that it goes straight.
 #ifndef USE_VECTOR3D
   floatX_t xOut, yOut, zOut, dirX, dirY, dirZ;  
-  helixBz.DoStep( track.position[0], track.position[1], track.position[2],
-                  track.direction[0], track.direction[1], track.direction[2],
+  helixBz.DoStep( track.pos[0], track.pos[1], track.pos[2],
+                  track.dir[0], track.dir[1], track.dir[2],
                   charge, momentumMag, step,
                   xOut, yOut, zOut, dirX, dirY, dirZ );                  
 
   // Update position, direction
-  track.position[0] = xOut;
-  track.position[1] = yOut;
-  track.position[2] = zOut;
-  track.direction[0] = dirX;
-  track.direction[1] = dirY;
-  track.direction[2] = dirZ;  
+  track.pos[0] = xOut;
+  track.pos[1] = yOut;
+  track.pos[2] = zOut;
+  track.dir[0] = dirX;
+  track.dir[1] = dirY;
+  track.dir[2] = dirZ;  
 #else  
-  helixBz.DoStep( pclPosition3d, pclDirection3d, charge, momentumMag, step,
+  helixBz.DoStep( track.pos, track.dir, charge, momentumMag, step,
                   positionOut3d, directionOut3d);
 
   // Update position, direction
-  track.position[0] = positionOut3d[0];
-  track.position[1] = positionOut3d[1];
-  track.position[2] = positionOut3d[2];
-  track.direction[0] = directionOut3d[0];
-  track.direction[1] = directionOut3d[1];
-  track.direction[2] = directionOut3d[2];
+  track.pos = positionOut3d;  
+  // track.pos[0] = positionOut3d[0];
+  // track.pos[1] = positionOut3d[1];
+  // track.pos[2] = positionOut3d[2];
+  track.dir = directionOut3d;
+  // track.dir[0] = directionOut3d[0];
+  // track.dir[1] = directionOut3d[1];
+  // track.dir[2] = directionOut3d[2];
 #endif
 
   // Alternative: load into local variables ?
@@ -228,15 +232,15 @@ void reportOneTrack( const SimpleTrack & track, int id = -1 )
              << " addr= " << & track   << " "
              << " pdg = " << setw(4) << track.pdg
              << " x,y,z = "
-             << setw(12) << track.position[0] << " , "
-             << setw(12) << track.position[1] << " , "
-             << setw(12) << track.position[2]
+             << setw(12) << track.pos[0] << " , "
+             << setw(12) << track.pos[1] << " , "
+             << setw(12) << track.pos[2]
              << " step = " << setw( 12 ) << track.stepSize
              << " kinE = " << setw( 10 ) << track.kineticEnergy
              << " Dir-x,y,z = "
-             << setw(12) << track.direction[0] << " , "
-             << setw(12) << track.direction[1] << " , "
-             << setw(12) << track.direction[2]
+             << setw(12) << track.dir[0] << " , "
+             << setw(12) << track.dir[1] << " , "
+             << setw(12) << track.dir[2]
              << std::endl;
 }
 
