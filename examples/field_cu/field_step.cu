@@ -21,16 +21,16 @@
 using floatX_t = double;  //  float type for X = position
 using floatE_t = double;  //  float type for E = energy  & momentum
 
+// using SimpleTrack = track;
+
 struct SimpleTrack {
   int      index{0};
   int      pdg{0};
-  floatE_t kineticEnergy{0};
+  floatE_t energy{0};  // kineticEnergy;
   floatX_t position[3]{0};
   vecgeom::Vector3D<double> pos;
   vecgeom::Vector3D<double> dir;
-  floatX_t stepSize;    // Current step size 
-  bool     flag1;
-  bool     flag2;
+  floatX_t interaction_length;    // Current step size
 };
 
 using  TrackBlock_t    = adept::BlockData<SimpleTrack>;
@@ -87,10 +87,10 @@ __device__ void initOneTrack(int            index,
   track.dir[1] = py * inv_pmag; 
   track.dir[2] = pz * inv_pmag;
 
-  track.stepSize = 0.001 * index * maxStepSize ; // curand_uniform(states) * maxStepSize;
+  track.interaction_length = 0.001 * index * maxStepSize ; // curand_uniform(states) * maxStepSize;
   
   floatE_t  mass = ( track.pdg == pdgGamma ) ?  0.0 : kElectronMassC2 ; // rest mass
-  track.kineticEnergy = pmag2 / ( sqrt( mass * mass + pmag2 ) + mass);
+  track.energy = pmag2 / ( sqrt( mass * mass + pmag2 ) + mass);
 }
 
 // this GPU kernel function is used to initialize 
@@ -137,7 +137,7 @@ void EvaluateField( const floatX_t pos[3], float fieldValue[3] )
 __host__ __device__
 void moveInField(SimpleTrack& track)
 {
-  floatX_t  step= track.stepSize;
+  floatX_t  step= track.interaction_length;
 
   // Charge for e+ / e-  only    ( gamma / other neutrals also ok.) 
   int    charge = (track.pdg == -11) - (track.pdg == 11);
@@ -150,7 +150,7 @@ void moveInField(SimpleTrack& track)
   // EvaluateField( pclPosition3d, fieldVector );
 
   // float restMass = ElectronMass;  // For now ... 
-  floatE_t kinE = track.kineticEnergy;
+  floatE_t kinE = track.energy;
   floatE_t momentumMag = sqrt( kinE * ( kinE + 2.0 * kElectronMassC2) );
   
   // Collect position, momentum
@@ -235,8 +235,8 @@ void reportOneTrack( const SimpleTrack & track, int id = -1 )
              << setw(12) << track.pos[0] << " , "
              << setw(12) << track.pos[1] << " , "
              << setw(12) << track.pos[2]
-             << " step = " << setw( 12 ) << track.stepSize
-             << " kinE = " << setw( 10 ) << track.kineticEnergy
+             << " step = " << setw( 12 ) << track.interaction_length
+             << " kinE = " << setw( 10 ) << track.energy
              << " Dir-x,y,z = "
              << setw(12) << track.dir[0] << " , "
              << setw(12) << track.dir[1] << " , "
