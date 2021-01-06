@@ -37,7 +37,9 @@ public:
   VECCORE_ATT_HOST_DEVICE
   ConstFieldHelixStepper(Vector3D<double> const &Bfield);
 
-  void SetB(double Bx, double By, double Bz)
+  void
+  VECCORE_ATT_HOST_DEVICE  
+  SetB(double Bx, double By, double Bz)
   {
     fB.Set(Bx, By, Bz);
     CalculateDerived();
@@ -73,21 +75,13 @@ public:
      ) const;
    
   /**
-   * basket version of dostep
-   * version that takes plain arrays as input; suited for first-gen GeantV
-   */
-  template <typename Real_v>
-  void DoStepArr(double const *posx, double const *posy, double const *posz, double const *dirx,
-                 double const *diry, double const *dirz, double const *charge,
-                 double const *momentum, double const *step, double *newposx, double *newposy,
-                 double *newposz, double *newdirx, double *newdiry, double *newdirz, int np) const;
-   
-  /**
    * this function propagates the track along the helix solution by a step
    * input: current position, current direction, some particle properties
    * output: new position, new direction of particle
    */
   template <typename Real_v>
+  inline   
+  VECCORE_ATT_HOST_DEVICE
   void DoStep(Vector3D<Real_v> const & position,
               Vector3D<Real_v> const & direction,
               Real_v           const & charge,
@@ -98,16 +92,18 @@ public:
    
   // Auxiliary methods
   template <typename Real_v>
-  GEANT_FORCE_INLINE void PrintStep(vecgeom::Vector3D<Real_v> const &startPosition,
+   void PrintStep(vecgeom::Vector3D<Real_v> const &startPosition,
                                     vecgeom::Vector3D<Real_v> const &startDirection, Real_v const &charge,
                                     Real_v const &momentum, Real_v const &step, vecgeom::Vector3D<Real_v> &endPosition,
                                     vecgeom::Vector3D<Real_v> &endDirection) const;
 
 protected:
+  inline VECCORE_ATT_HOST_DEVICE
   void CalculateDerived();
 
   template <typename Real_v>
-  GEANT_FORCE_INLINE bool CheckModulus(Real_v &newdirX_v, Real_v &newdirY_v, Real_v &newdirZ_v) const;
+  inline  VECCORE_ATT_HOST_DEVICE
+  bool CheckModulus(Real_v &newdirX_v, Real_v &newdirY_v, Real_v &newdirZ_v) const;
 
 private:
   Vector3D<double> fB;
@@ -116,26 +112,26 @@ private:
   Vector3D<double> fUnit;
 }; // end class declaration
 
-GEANT_FORCE_INLINE
+inline // __host__ __device__
 void ConstFieldHelixStepper::CalculateDerived()
 {
-  fBmag = fB.mag();
+  fBmag = fB.Mag();
   fUnit = fBmag > 0.0 ? (1.0/fBmag) * fB : Vector3D<Real_v>(1.0, 0.0, 0.0);
 }
 
-GEANT_FORCE_INLINE
+inline
 ConstFieldHelixStepper::ConstFieldHelixStepper(double Bx, double By, double Bz) : fB(Bx, By, Bz)
 {
   CalculateDerived();
 }
 
-GEANT_FORCE_INLINE
+inline
 ConstFieldHelixStepper::ConstFieldHelixStepper(double B[3]) : fB(B[0], B[1], B[2])
 {
   CalculateDerived();
 }
 
-GEANT_FORCE_INLINE
+inline
 VECCORE_ATT_HOST_DEVICE
 ConstFieldHelixStepper::ConstFieldHelixStepper(vecgeom::Vector3D<double> const &Bfield) : fB(Bfield)
 {
@@ -148,7 +144,7 @@ ConstFieldHelixStepper::ConstFieldHelixStepper(vecgeom::Vector3D<double> const &
  * output: new position, new direction of particle
  */
 template <typename Real_v>
-GEANT_FORCE_INLINE void ConstFieldHelixStepper::DoStep(Real_v const &x0, Real_v const &y0, Real_v const &z0,
+inline void ConstFieldHelixStepper::DoStep(Real_v const &x0, Real_v const &y0, Real_v const &z0,
                                                        Real_v const &dirX0, Real_v const &dirY0, Real_v const &dirZ0,
                                                        Real_v const &charge, Real_v const &momentum, Real_v const &step,
                                                        Real_v &x, Real_v &y, Real_v &z, Real_v &dx, Real_v &dy,
@@ -268,7 +264,7 @@ ConstFieldHelixStepper::CheckModulus(Real_v &newdirX_v,
 
 
 template <typename Real_v>
-GEANT_FORCE_INLINE
+inline
 void ConstFieldHelixStepper::PrintStep(
    vecgeom::Vector3D<Real_v> const &startPosition,
    vecgeom::Vector3D<Real_v> const &startDirection,
