@@ -48,6 +48,10 @@ public:
   VECCORE_ATT_HOST_DEVICE   
   Vector3D<double> const &GetFieldVec() const { return fB; }
 
+  static constexpr float kB2C =
+     -0.299792458 * (copcore::units::GeV /
+                     (copcore::units::tesla * copcore::units::meter) ) ;
+   
   /*
   template<typename RT, typename Vector3D>
   RT GetCurvature(Vector3D const & dir,
@@ -179,7 +183,7 @@ void ConstFieldHelixStepper::DoStep(vecgeom::Vector3D<Real_v> const &startPositi
                                     vecgeom::Vector3D<Real_v> &endPosition,
                                     vecgeom::Vector3D<Real_v> &endDirection) const
 {
-  const Real_v kB2C_local(-0.299792458e-3);
+  // const Real_v kB2C_local(-0.299792458e-3);
   const Real_v kSmall(1.E-30);
   using vecgeom::Vector3D;
 
@@ -203,7 +207,7 @@ void ConstFieldHelixStepper::DoStep(vecgeom::Vector3D<Real_v> const &startPositi
   Real_v sinVB   = sqrt(dt2) + kSmall;
 
   // radius has sign and determines the sense of rotation
-  Real_v R = momentum * sinVB / (kB2C_local * charge * fBmag);
+  Real_v R = momentum * sinVB / (kB2C * charge * fBmag);
 
   Vector3D<Real_v> restVelX = startDirection - UVdotUB * dir1Field;
 
@@ -229,7 +233,7 @@ void ConstFieldHelixStepper::DoStep(vecgeom::Vector3D<Real_v> const &startPositi
   assert(fabs(dirVelX.Dot(dirCrossVB)) < 1.e-6);
   assert(fabs(dirCrossVB.Dot(dir1Field)) < 1.e-6);
 
-  Real_v phi = -step * charge * fBmag * kB2C_local / momentum;
+  Real_v phi = -step * charge * fBmag * kB2C / momentum;
 
   // printf("CVFHS> phi= %g \n", vecCore::Get(phi,0) );  // phi (scalar)  or phi[0] (vector)
 
