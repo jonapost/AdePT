@@ -70,7 +70,7 @@ __device__ void initOneTrack(unsigned int  index,
   aTrack.dir[1] = py * inv_pmag; 
   aTrack.dir[2] = pz * inv_pmag;
 
-  aTrack.interaction_length = 0.001 * index * maxStepSize ; // aTrack.uniform() * maxStepSize;
+  aTrack.interaction_length = 0.001 * (index+1) * maxStepSize ; // aTrack.uniform() * maxStepSize;
   
   // double  mass = ( aTrack.pdg == pdgGamma ) ?  0.0 : kElectronMassC2 ; // rest mass
   double  mass = aTrack.mass();
@@ -124,8 +124,8 @@ __global__ void overwriteTracks( adept::BlockData<track> *trackBlock,
      
 static float BzValue = 0.1 * copcore::units::tesla;
 
-static float BfieldValue[3] = { 0.001 * copcore::units::tesla,
-                               -0.001 * copcore::units::tesla,
+static float BfieldValue[3] = { 1.0e-25 * copcore::units::tesla,
+                               -1.0e-25 * copcore::units::tesla,
                                BzValue };
 
 // V1 -- field along Z axis
@@ -292,14 +292,22 @@ int main( int argc, char** argv )
   std::cout << " Calling move in field (host)." << std::endl;
 
 
+  vecgeom::Vector3D<float> magFieldVec( BfieldValue[0],
+                                        BfieldValue[1],
+                                        BfieldValue[2] );
+  ConstFieldHelixStepper  helixStepper(magFieldVec);  // Re-use it (expensive sqrt & div.)
   
   for( int i = 0; i<SmallNum ; i++){
      ThreeVector endPosition, endDirection;
      track  hostTrack = tracksStart_host[i];  // (*trackBlock_uniq)[i];
      // hostTrack.pos = 
-  
-     fieldPropagatorConstBz( hostTrack, BzValue, endPosition, endDirection );
 
+     if( useBzOnly ){     
+        fieldPropagatorConstBz( hostTrack, BzValue, endPosition, endDirection );
+     } else {
+        fieldPropagatorConstBgeneral( hostTrack, helixStepper, endPosition, endDirection );        
+     }
+     
      double move       = (endPosition  - hostTrack.pos).Mag();
      double deflection = (endDirection - hostTrack.dir).Mag();
      
@@ -316,6 +324,7 @@ int main( int argc, char** argv )
      bool badDirection = dirDiff.Mag() > tol * deflection;
      
      if( badPosition || badDirection ){
+        std::cout << std::endl;        
         std::cout << " Difference seen for Track " << i
                   << " addr = " << & (*trackBlock_uniq)[i]
                   << std::endl;
@@ -331,12 +340,12 @@ int main( int argc, char** argv )
         devTrackVal.print( i );
 
         if( badPosition ){
-           std::cout << " Position  diff = " << posDiff << " ";
+           std::cout << " Position  diff = " << posDiff << " mag = " << posDiff.Mag() << " vs move      = " << move << " " << std::endl;
         }
         if( badDirection ){
-           std::cout << " Direction diff = " << dirDiff << " ";
+           std::cout << " Direction diff = " << dirDiff << " mag = " << dirDiff.Mag() << " vs deflection = " << deflection << " " << std::endl;
         }
-        
+        std::cout << std::endl;
         // printTrack( hostTrack, i );
      }
   }
