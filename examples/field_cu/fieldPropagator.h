@@ -7,7 +7,7 @@
 #include <CopCore/PhysicalConstants.h>
 
 #include "ConstBzFieldStepper.h"
-#include "ConstFieldStepper.h"
+#include "ConstFieldHelixStepper.h"
 
 using copcore::units::kElectronMassC2;
 
@@ -39,18 +39,19 @@ void fieldPropagatorConstBz(track &    aTrack,
   }
 }
 
-#ifdef B_ANY_VALUE
+#define BFIELD_ANY_VALUE 1
+
+#ifdef BFIELD_ANY_VALUE
 __host__ __device__
 void fieldPropagatorConstBgeneral(track &    aTrack,
                            // const vecgeom::Vector3D<double> magFieldVec,
-                           ConstFieldHelixStepper  helixAnyB,
-
+                           ConstFieldHelixStepper    helixAnyB,
                            vecgeom::Vector3D<double> & endPosition,
                            vecgeom::Vector3D<double> & endDirection )
 {
-  double    step= aTrack.interaction_length;
-  int     charge= aTrack.charge();
-  
+  double    step= aTrack.interaction_length;  // was float
+  double  charge= aTrack.charge();            // was Int
+
   if ( charge != 0.0 ) {
      double kinE = aTrack.energy;
      double momentumMag = sqrt( kinE * ( kinE + 2.0 * kElectronMassC2) );
