@@ -39,9 +39,6 @@ void fieldPropagatorConstBz(track &    aTrack,
   }
 }
 
-#define BFIELD_ANY_VALUE 1
-
-#ifdef BFIELD_ANY_VALUE
 __host__ __device__
 void fieldPropagatorConstBgeneral(track &    aTrack,
                            // const vecgeom::Vector3D<double> magFieldVec,
@@ -49,20 +46,18 @@ void fieldPropagatorConstBgeneral(track &    aTrack,
                            vecgeom::Vector3D<double> & endPosition,
                            vecgeom::Vector3D<double> & endDirection )
 {
-  double    step= aTrack.interaction_length;  // was float
-  double  charge= aTrack.charge();            // was Int
+  int     charge = aTrack.charge();
+  double  step   = aTrack.interaction_length;  // was float
 
-  if ( charge != 0.0 ) {
-     double kinE = aTrack.energy;
-     double momentumMag = sqrt( kinE * ( kinE + 2.0 * kElectronMassC2) );
+  if ( charge != 0 ) {
+     double  kinE        = aTrack.energy;
+     double  momentumMag = sqrt( kinE * ( kinE + 2.0 * kElectronMassC2) );
      // aTrack.mass() -- when extending with other charged particles 
-     
-     // ConstFieldHelixStepper  helixAnyB(magFieldVec);
      
      // For now all particles ( e-, e+, gamma ) can be propagated using this
      //   for gammas  charge = 0 works, and ensures that it goes straight.
      
-     helixAnyB.DoStep( aTrack.pos, aTrack.dir, charge, momentumMag, step,
+     helixAnyB.DoStep( aTrack.pos, aTrack.dir, (double) charge, momentumMag, step,
                        endPosition, endDirection);
   } else {
      // Also move gammas - for now ..
@@ -70,8 +65,6 @@ void fieldPropagatorConstBgeneral(track &    aTrack,
      endDirection = aTrack.dir;
   }
 }
-#endif
-
 
 // For RK methods
 

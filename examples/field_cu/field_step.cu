@@ -16,6 +16,7 @@
 
 #include <AdePT/BlockData.h>
 
+#include "uniformMagField.h"
 #include "fieldPropagator.h"
 
 #include "trackBlock.h"
@@ -124,8 +125,8 @@ __global__ void overwriteTracks( adept::BlockData<track> *trackBlock,
      
 static float BzValue = 0.1 * copcore::units::tesla;
 
-static float BfieldValue[3] = { 1.0e-25 * copcore::units::tesla,
-                               -1.0e-25 * copcore::units::tesla,
+static float BfieldValue[3] = { 0.001 * copcore::units::tesla,
+                               -0.001 * copcore::units::tesla,
                                BzValue };
 
 // V1 -- field along Z axis
@@ -157,8 +158,8 @@ __global__ void fieldPropagatorBz_glob(adept::BlockData<track> *trackBlock, floa
 
 // V2 -- constant field any direction 
 __global__ void fieldPropagatorAnyDir_glob(adept::BlockData<track> *trackBlock,
-                                           float Bx, float By, float Bz )
-                                           // AgnosticUniformMagField Bfield )  // by value !?
+                                           // float Bx, float By, float Bz,
+                                           uniformMagField Bfield )  // by value !?
                                            // const uniformMagField& Bfield )   
 {
   // template <type T> using Vector3D = vecgeom::Vector3D<T>;
@@ -167,12 +168,10 @@ __global__ void fieldPropagatorAnyDir_glob(adept::BlockData<track> *trackBlock,
   
   int maxIndex = trackBlock->GetNused() + trackBlock->GetNholes();   
 
-  // float Bvalue[3];
-  // Bfield.ObtainValue( Bvalue );
-  vecgeom::Vector3D<float> magFieldVec( Bx, By, Bz ); // Bvalue[0], Bvalue[1], Bvalue[2] );
-  // Bfield.ObtainValue( magFieldVec );  //  To-do - to simplify 
+  float Bvalue[3];
+  Bfield.ObtainField( Bvalue );
   
-  ConstFieldHelixStepper  helixAnyB(magFieldVec);  // Re-use it (expensive sqrt & div.)
+  ConstFieldHelixStepper helixAnyB=  ConstFieldHelixStepper( Bvalue );
   
   // Non-block version:
   //   int pclIdx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -192,8 +191,6 @@ __global__ void fieldPropagatorAnyDir_glob(adept::BlockData<track> *trackBlock,
      aTrack.dir = endDirection;
   }
 }
-
-
 
 int main( int argc, char** argv )
 {
@@ -216,9 +213,7 @@ int main( int argc, char** argv )
   std::cout << "  Bz = " << BzValue / copcore::units::tesla << " T " << std::endl;
 
   // uniformMagField Bfield( BfieldValue );
-
-  // #include "AgnosticUniformMagField.h"
-  //  AgnosticUniformMagField BfieldObj( BfieldValue );
+  uniformMagField BfieldObj( BfieldValue );
   
   // Track capacity of the block
   constexpr int capacity = 1 << 16;
@@ -281,21 +276,17 @@ int main( int argc, char** argv )
      //*********
   } else {
      fieldPropagatorAnyDir_glob<<<numBlocks, numThreadsPerBlock>>>(trackBlock_uniq,
-                                                                   BfieldValue[0],
-                                                                   BfieldValue[1],
-                                                                   BfieldValue[2] );                 
-                                                                   // BfieldObj );
+                                                                   BfieldObj );
   }
   cudaDeviceSynchronize();  
 
   // 4. Check results on host
   std::cout << " Calling move in field (host)." << std::endl;
 
-
   vecgeom::Vector3D<float> magFieldVec( BfieldValue[0],
                                         BfieldValue[1],
                                         BfieldValue[2] );
-  ConstFieldHelixStepper  helixStepper(magFieldVec);  // Re-use it (expensive sqrt & div.)
+  ConstFieldHelixStepper  helixStepper( magFieldVec); // -> BfieldObj );  // Re-use it (expensive sqrt & div.)
   
   for( int i = 0; i<SmallNum ; i++){
      ThreeVector endPosition, endDirection;
