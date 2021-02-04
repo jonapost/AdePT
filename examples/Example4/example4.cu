@@ -50,7 +50,7 @@ struct Scoring {
 
 #include "ConstBzFieldStepper.h"
 
-// #define  CHORD_STATS 1
+#define  CHORD_STATS 1
 
 #include "IterationStats.h"
 #include "fieldPropagatorConstBz.h"
@@ -90,6 +90,8 @@ __global__ void DefinePhysicalStepLength(adept::BlockData<track> *block, process
   fieldPropagatorConstBz fieldPropagatorBz(BzFieldValue);
 
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += blockDim.x * gridDim.x) {
+    bool fullLengthInField= false;
+     
     // skip particles that are already dead
     track &mytrack = (*block)[i];
 
@@ -106,23 +108,35 @@ __global__ void DefinePhysicalStepLength(adept::BlockData<track> *block, process
     // now, I know which process wins, so I add the particle to the appropriate queue
     float physics_step = proclist->GetPhysicsInteractionLength(i, block);
 
-    float geom_step = transportation<fieldPropagatorConstBz>::transport(mytrack, fieldPropagatorBz, physics_step);
+    float geom_step = transportation<fieldPropagatorConstBz>::transport(mytrack, fieldPropagatorBz, physics_step, fullLengthInField);
     mytrack.total_length += geom_step;
 
-    if (mytrack.next_state.IsOnBoundary()) { // ( geom_step == physics_step ) {  // JA-TEMP
+    if (mytrack.next_state.IsOnBoundary()) { // ( geom_step == physics_step ) {
       // For now, just count that we hit something.
       scor->hits++;
       mytrack.SwapStates();
     } else {
-      // Enqueue track index for later processing.
-      // assert(mytrack.current_process >= 0);
-      if (mytrack.current_process >= 0) // JA-TOFIX --- take this out !!!
-        queues[mytrack.current_process]->push_back(i);
-
-      if (mytrack.current_state.IsOnBoundary()) {
-        mytrack.SwapStates();
-        // Just to clear the boundary flag from the current step ...
-      }
+       if( !fullLengthInField ){
+          // Do nothing -- the particle has moved.
+          //   Physics must not occur.  The step to the next interaction will be resampled ... 
+          // ELse
+          //   Could update physics_step for reuse in next step ... ?
+          // ELSE
+          //   Use a new queue to finish integration => but after this the particle must interact if not on boundary !
+          // const int fieldContinueIntegration = ... ; // Fixed queue for continued field integration ??
+          // queues[fieldContinueIntegration]->push_back(i);
+          // Once it arrives at the end (if not on boundary)  => put in queue for physics process in next step ?
+       } else {
+          assert(mytrack.current_process >= 0);
+          // Enqueue track index for later processing.          
+          if (mytrack.current_process >= 0) // JA-TOFIX --- take this out !!!
+             queues[mytrack.current_process]->push_back(i);
+          
+          if (mytrack.current_state.IsOnBoundary()) {
+             mytrack.SwapStates();
+             // Just to clear the boundary flag from the current step ...
+          }
+       }
     }
 
     // mytrack.SwapStates();

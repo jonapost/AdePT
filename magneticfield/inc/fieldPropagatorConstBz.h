@@ -31,8 +31,7 @@ public:
                                        vecgeom::Vector3D<double> &endDirection);
 
   __device__ //  __host__
-      double
-      ComputeStepAndPropagatedState(track &aTrack, float physicsStep);
+  double ComputeStepAndPropagatedState(track &aTrack, float physicsStep, bool& fullStep );
 
 private:
   float BzValue;
@@ -105,8 +104,9 @@ __global__ void moveInField(adept::BlockData<track> *trackBlock,
 //  ( Same name as as navigator method. )
 __device__ // __host__
     double
-    fieldPropagatorConstBz::ComputeStepAndPropagatedState(track &aTrack, float physicsStep)
+fieldPropagatorConstBz::ComputeStepAndPropagatedState(track &aTrack, float physicsStep, bool& doneFullStep )
 {
+  // doneFullStep: flag to signify that field integration finished (found boundary or went full length)   
   if (aTrack.status != alive) return 0.0;
 
   double kinE        = aTrack.energy;
@@ -138,9 +138,8 @@ __device__ // __host__
     stepDone = LoopNavigator::ComputeStepAndPropagatedState(position, direction, physicsStep, aTrack.current_state,
                                                             aTrack.next_state);
     position += (stepDone + kPushField) * direction;
+    doneFullStep = true;
   } else {
-    bool fullChord = false;
-
     //  Locate the intersection of the curved trajectory and the boundaries of the current
     //    volume (including daughters).
     //  Most electron tracks are short, limited by physics interactions -- the expected
@@ -148,7 +147,11 @@ __device__ // __host__
     //    ( Measuring iterations to confirm the maximum. )
     constexpr int maxChordIters = 10;
     int chordIters              = 0;
+    bool remainingStep = true;  // there remains a part of the step to be done
+
     do {
+      bool fullChord = false;  // taken full (current) chord
+      
       vecgeom::Vector3D<double> endPosition  = position;
       vecgeom::Vector3D<double> endDirection = direction;
       double safeMove                        = min(remains, safeLength);
@@ -184,8 +187,11 @@ __device__ // __host__
       remains -= move;
       chordIters++;
 
-    } while ((!aTrack.next_state.IsOnBoundary()) && fullChord && (remains > epsilon_step * physicsStep) &&
-             (chordIters < maxChordIters));
+      remainingStep = (!aTrack.next_state.IsOnBoundary()) && fullChord && (remains > epsilon_step * physicsStep);
+      
+    } while ( remainingStep && (chordIters < maxChordIters));
+
+    doneFullStep = !remainingStep; 
 
 #ifdef CHORD_STATS
     // This stops it from being usable on __host__
