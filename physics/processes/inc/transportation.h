@@ -4,6 +4,8 @@
 #include "track.h"
 #include "AdePT/LoopNavigator.h"
 
+#include "transportConstants.h"
+
 template <class fieldPropagator_t, bool BfieldOn = true>
 class transportation {
 public:
@@ -17,8 +19,6 @@ public:
 // Calculates the next navigation state (if encountering boundary
 //
 // Description last updated: 2021.01.19
-
-constexpr float kPushLinear = 1.0e-8; // * copcore::units::millimeter;
 
 template <class fieldPropagator_t, bool BfieldOn>
 __host__ __device__ float transportation<fieldPropagator_t, BfieldOn>::transport(track &mytrack,
@@ -36,22 +36,22 @@ __host__ __device__ float transportation<fieldPropagator_t, BfieldOn>::transport
                                                         mytrack.next_state);
     mytrack.pos += (step + kPushLinear) * mytrack.dir;
     fullLengthInField= true; // not relevant 
-    mytrack.current_process = -1;    
+    mytrack.current_process = kBoundaryLinear;    
   } else {
     bool  finishedIntegration= false;  // has field integration finished (found boundary or went full length)     
     step = fieldPropagator.ComputeStepAndPropagatedState(mytrack, physics_step, finishedIntegration);
     // updated state of 'mytrack'
     
     if (step < physics_step ) {
-      // Either found a boundary or reached max iterations of integration
-      if( finishedIntegration ) {
+       // Either found a boundary or reached max iterations of integration
+       if( finishedIntegration ) {
          assert( mytrack.next_state.IsOnBoundary() && "Field Propagator returned step<phys -- yet NOT boundary!");
+         mytrack.current_process = kBoundaryWithField;
+      } else {
+         mytrack.current_process = kUnfinishedIntegration;
       }
-      mytrack.current_process = -2;
     }
-
     fullLengthInField= finishedIntegration;
-    
   }
   // if (step < physics_step) mytrack.current_process = BfieldOn ? -2 : -1;
 

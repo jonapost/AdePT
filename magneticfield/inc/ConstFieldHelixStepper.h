@@ -100,9 +100,10 @@ private:
 
 }; // end class declaration
 
-inline // __host__ __device__
-    void
-    ConstFieldHelixStepper::CalculateDerived(Vector3D<float> Bvec)
+
+inline VECCORE_ATT_HOST_DEVICE 
+void
+ConstFieldHelixStepper::CalculateDerived(Vector3D<float> Bvec)
 {
   fBmag         = Bvec.Mag();
   float bMagInv = (1.0 / fBmag);
@@ -110,18 +111,18 @@ inline // __host__ __device__
   if (fBmag > 0.0) fUnit = bMagInv * Bvec;
 }
 
-inline ConstFieldHelixStepper::ConstFieldHelixStepper(float Bx, float By, float Bz) // : fB(Bx, By, gBz)
+inline ConstFieldHelixStepper::ConstFieldHelixStepper(float Bx, float By, float Bz)
 {
   CalculateDerived(Vector3D<float>(Bx, By, Bz));
 }
 
-inline ConstFieldHelixStepper::ConstFieldHelixStepper(float B[3]) // : fB(B[0], B[1], B[2])
+inline ConstFieldHelixStepper::ConstFieldHelixStepper(float B[3])
 {
   CalculateDerived(Vector3D<float>(B[0], B[1], B[2]));
 }
 
 inline VECCORE_ATT_HOST_DEVICE ConstFieldHelixStepper::ConstFieldHelixStepper(
-    vecgeom::Vector3D<float> const &Bfield) // : fB(Bfield)
+    vecgeom::Vector3D<float> const &Bfield)
 {
   CalculateDerived(Bfield);
 }

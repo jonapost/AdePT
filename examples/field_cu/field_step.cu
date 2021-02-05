@@ -61,8 +61,8 @@ int main(int argc, char **argv)
   }
   std::cout << "  Bz = " << BzValue / copcore::units::tesla << " T " << std::endl;
 
-  uniformMagField Bfield(BfieldValue);
-
+  // uniformMagField Bfield(BfieldValue);
+  
   // Track capacity of the block
   constexpr int capacity = 1 << 16;
 
@@ -119,15 +119,20 @@ int main(int argc, char **argv)
   //  cudaMemcpy(tracksStart_host, &(*trackBlock_dev)[0], SmallNum*sizeof(track), cudaMemcpyDeviceToHost );
 
   // 3. Propagate tracks -- on device
-  fieldPropagatorConstBz fieldPropagatorBz(BzValue);
-  fieldPropagatorConstBany fieldPropagatorBany;
+  fieldPropagatorConstBz       fieldPropagatorBz_host(BzValue);
+  fieldPropagatorConstBany     fieldPropagatorBany_host(BfieldValue);
+  fieldPropagatorConstBany* ptrFieldPropagatorBany_dev = nullptr;
+  ptrFieldPropagatorBany_dev = fieldPropagatorBany_host.cloneToDevice();
+
   if (useBzOnly) {
     // Uniform field - parallel to z axis
-    moveInField<<<numBlocks, numThreadsPerBlock>>>(trackBlock_uniq, fieldPropagatorBz); // , BzValue );
-                                                                                        //*********
+     moveInField<<<numBlocks, numThreadsPerBlock>>>(trackBlock_uniq,
+                                                    fieldPropagatorBz_host  // pass by value
+       );
   } else {
     // Uniform field - not along z axis
-    moveInField<<<numBlocks, numThreadsPerBlock>>>(trackBlock_uniq, fieldPropagatorBany, Bfield);
+    moveInField<<<numBlocks, numThreadsPerBlock>>>(trackBlock_uniq,
+                                                   ptrFieldPropagatorBany_dev );
     //*********
   }
   cudaDeviceSynchronize();
@@ -146,10 +151,9 @@ int main(int argc, char **argv)
     if (useBzOnly) {
       // fieldPropagatorConstBz( hostTrack, BzValue, endPosition, endDirection );
       // fieldPropagatorConstBz::moveInField( hostTrack, BzValue, endPosition, endDirection );
-      fieldPropagatorBz.stepInField(hostTrack, /*BzValue,*/ endPosition, endDirection);
+      fieldPropagatorBz_host.stepInField(hostTrack, /*BzValue,*/ endPosition, endDirection);
     } else {
-      // fieldPropagatorConstBgeneral( hostTrack, helixStepper, endPosition, endDirection );
-      fieldPropagatorBany.stepInField(hostTrack, helixStepper, endPosition, endDirection);
+      fieldPropagatorBany_host.stepInField(hostTrack, /*helixStepper,*/ endPosition, endDirection);
     }
 
     double move       = (endPosition - hostTrack.pos).Mag();
@@ -207,4 +211,7 @@ int main(int argc, char **argv)
   //          See where they went ?
   std::cout << " Ending tracks: " << std::endl;
   printTracks(trackBlock_uniq, false, numTracks);
+
+  // Cleanup
+  ptrFieldPropagatorBany_dev->freeClone();
 }
