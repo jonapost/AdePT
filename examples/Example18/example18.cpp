@@ -32,9 +32,11 @@
 
 #include <CopCore/SystemOfUnits.h>
 #include <AdePT/ArgParser.h>
-#include <AdePT/NVTX.h>
 
 static constexpr double DefaultCut = 0.7 * mm;
+
+float BzFieldValue_host = 1.0 * copcore::units::tesla;
+float *BzFieldValue_dev = nullptr;
 
 const G4VPhysicalVolume *InitGeant4(const std::string &gdml_file)
 {
@@ -196,6 +198,20 @@ int main(int argc, char *argv[])
   OPTION_INT(batch, -1);
   OPTION_BOOL(rotatingParticleGun, false);
 
+  OPTION_DOUBLE(bzValue, -1.00); // entered in tesla
+  BzFieldValue_host = bzValue * copcore::units::tesla;
+
+  std::cout << "INFO: Particles to simulate = " << particles << " \n";  
+  std::cout << "INFO: Bz field value = " << bzValue << " T (tesla) \n"; 
+
+  constexpr int stackLimit= 8 * 1024;  // 8192 
+  printf("example15.cpp/main(): Setting Cuda Device Stack Limit to %6d \n", stackLimit);
+  cudaError_t error = cudaDeviceSetLimit(cudaLimitStackSize, stackLimit);
+  if (error != cudaSuccess) {
+     printf("cudaDeviceSetLimit failed with %d, line(%d)\n", error, __LINE__);
+     exit(EXIT_FAILURE);
+  }
+  
   vecgeom::Stopwatch timer;
   timer.Start();
 

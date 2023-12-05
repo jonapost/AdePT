@@ -158,7 +158,90 @@ __global__ void ClearQueue(adept::MParray *queue)
   queue->clear();
 }
 
-void example18(int numParticles, double energy, int batch, const int *MCIndex_host,
+__global__ void printTrackV2(const Track* trkArray_dev,
+                             const adept::MParray *active_dev,
+                             int i,
+                             bool verbose)
+{
+  const int slot = (*active_dev)[i];
+  trkArray_dev[slot].print(slot, verbose);
+}
+
+__global__
+void get_size( const adept::MParray *arr_dev, int* capacity_dev )
+{
+   *capacity_dev = arr_dev->size();
+   // printf( " Size of arr_dev %p = %d \n", arr_dev, *capacity_dev );
+}
+
+__host__
+int obtain_size( const adept::MParray *arr_dev )
+{
+  static int* pCapacity_dev = nullptr;
+  int capacity_host;
+  
+  if( ! pCapacity_dev ) {
+    COPCORE_CUDA_CHECK(cudaMalloc(&pCapacity_dev, sizeof(int)));
+    std::cout << " Created memory space for capacity_dev.  Ptr = " << pCapacity_dev << std::endl;
+  }
+
+  // Fill it on device
+  get_size<<<1,1>>>(arr_dev, pCapacity_dev);
+
+  // Fetch it from the device
+  COPCORE_CUDA_CHECK(cudaMemcpy( &capacity_host, pCapacity_dev,
+                                 sizeof(int), cudaMemcpyDeviceToHost) );
+  return capacity_host;  
+}
+
+__host__
+void printTracks( const Track *trackArr_dev, 
+                  const adept::MParray *active_dev,
+                  short particleTypeId,
+                  bool verbose,
+                  int numTracks  )
+{
+  static const char* particleTypeName[ParticleType::NumParticleTypes] = { "Electrons", "Positrons", "Gammas" };
+  static const char* particleShortName[] = { "e-", "e+", "g" };
+  // int numPrinted = 0;
+  int capacity_host= obtain_size( active_dev );
+
+  if( numTracks > 0 ) {
+     printf("%s : %d\n", particleTypeName[particleTypeId], numTracks );
+
+     for( int i= 0; i < capacity_host; i++ ){
+        // Track &trk = *(trackArr+i);
+        printf(" %2s (pid= %2d) ", particleShortName[particleTypeId], particleTypeId );
+        //if (numPrinted++ < numTracks )
+        //{
+           printTrackV2<<<1, 1>>>(trackArr_dev, active_dev, i, verbose);
+           // std::cout << "\n";
+        // }
+        cudaDeviceSynchronize();                                                  
+     }
+     // cudaDeviceSynchronize();                                       
+  }
+}
+
+__host__
+void printActiveTracks( ParticleType& electrons, ParticleType& positrons, ParticleType& gammas, bool verbTrk )
+{
+  int numElectrons = obtain_size(electrons.queues.currentlyActive);
+  int numPositrons = obtain_size(positrons.queues.currentlyActive);
+  int numGammas = obtain_size(gammas.queues.currentlyActive);
+  // printf("Electrons: \n");
+  printTracks( electrons.tracks, electrons.queues.currentlyActive, ParticleType::Electron, /* "Electrons", */ verbTrk, numElectrons );
+  // printf("Positrons: \n");  
+  printTracks( positrons.tracks, positrons.queues.currentlyActive, ParticleType::Positron, verbTrk, numPositrons );
+  // printf("Gammas: \n");  
+  printTracks( gammas.tracks,  gammas.queues.currentlyActive, ParticleType::Gamma, verbTrk, numGammas );
+  std::cout << std::endl;
+}
+
+// #define VERBOSE_REPORT  1
+//    To obtain information both intermediately in an iteration and at the end
+
+void example15(int numParticles, double energy, int batch, const int *MCIndex_host,
                ScoringPerVolume *scoringPerVolume_host, GlobalScoring *globalScoring_host, int numVolumes,
                int numPlaced, G4HepEmState *state, bool rotatingParticleGun)
 {
@@ -176,6 +259,7 @@ void example18(int numParticles, double energy, int batch, const int *MCIndex_ho
   constexpr int Capacity = 1024 * 1024;
 
   std::cout << "INFO: capacity of containers set to " << Capacity << std::endl;
+  std::cout << "INFO: number of particles = " << numParticles << std::endl;
   if (batch == -1) {
     // Rule of thumb: at most 2000 particles of one type per GeV primary.
     batch = Capacity / ((int)energy / copcore::units::GeV) / 2000;
@@ -183,11 +267,12 @@ void example18(int numParticles, double energy, int batch, const int *MCIndex_ho
     batch = 1;
   }
   std::cout << "INFO: batching " << batch << " particles for transport on the GPU" << std::endl;
-  if (BzFieldValue != 0) {
-    std::cout << "INFO: running with field Bz = " << BzFieldValue / copcore::units::tesla << " T" << std::endl;
+  if (BzFieldValue_host != 0) {
+    std::cout << "INFO: running with field Bz = " << BzFieldValue_host / copcore::units::tesla << " T" << std::endl;
   } else {
     std::cout << "INFO: running with magnetic field OFF" << std::endl;
   }
+  std::cout<<std::flush;
 
   // Allocate structures to manage tracks of an implicit type:
   //  * memory to hold the actual Track elements,
@@ -253,15 +338,27 @@ void example18(int numParticles, double energy, int batch, const int *MCIndex_ho
   COPCORE_CUDA_CHECK(cudaMalloc(&slotManagerInit_dev, sizeof(SlotManager)));
   COPCORE_CUDA_CHECK(cudaMemcpy(slotManagerInit_dev, &slotManagerInit, sizeof(SlotManager), cudaMemcpyHostToDevice));
 
+  COPCORE_CUDA_CHECK(cudaMalloc(&BzFieldValue_dev, sizeof(BzFieldValue_host)));
+  COPCORE_CUDA_CHECK(cudaMemcpy(BzFieldValue_dev, &BzFieldValue_host, sizeof(BzFieldValue_host), cudaMemcpyHostToDevice));
+  std::cout << " Host: passed value of BzField to device at " << BzFieldValue_dev << " value = " << BzFieldValue_host << "\n";
+
+  // Pass the location of the BzFieldValue_dev !
+  SetBzFieldPtr<<<1,1>>>(BzFieldValue_dev);
+  COPCORE_CUDA_CHECK(cudaStreamSynchronize(stream));
+
   vecgeom::Stopwatch timer;
   timer.Start();
   tracer.setTag("sim");
-
+  
+  std::cout << "Entering loop to simulate " << numParticles << " particles. " << std::flush;
+  
   std::cout << std::endl << "Simulating particles ";
-  const bool detailed = (numParticles / batch) < 50;
+  const bool detailed = true; //  (numParticles / batch) < 50;
   if (!detailed) {
     std::cout << "... " << std::flush;
   }
+  
+  constexpr bool printStats= false;
 
   unsigned long long killed = 0;
 
@@ -301,6 +398,9 @@ void example18(int numParticles, double energy, int batch, const int *MCIndex_ho
     int maxInFlight = chunk, localMinInFlight = chunk;
     NVTXTracer occupTracer("Occup trace");
 #endif
+
+    // constexpr int mod_it=25;
+    int iteration= 0;
 
     do {
       Secondaries secondaries = {
@@ -350,7 +450,7 @@ void example18(int numParticles, double energy, int batch, const int *MCIndex_ho
         COPCORE_CUDA_CHECK(cudaEventRecord(gammas.event, gammas.stream));
         COPCORE_CUDA_CHECK(cudaStreamWaitEvent(stream, gammas.event, 0));
       }
-
+      
       // *** END OF TRANSPORT ***
 
       // The events ensure synchronization before finishing this iteration and
@@ -397,7 +497,21 @@ void example18(int numParticles, double energy, int batch, const int *MCIndex_ho
         loopingNo         = 0;
       }
 
+      iteration++;
+      const int  iterModPrint = 100;  // Every how many to print info
+      if( printStats && ( iteration % iterModPrint == 0 ) ) {
+         printf("Iteration = %6d   event = %4d   inflight= %6d  ( e- : %6d g : %5d e+ : %4d) iter looping=%3d \n" ,
+                iteration, startEvent, inFlight,
+                numElectrons, numGammas, numPositrons, loopingNo );
+      } 
+      
     } while (inFlight > 0 && loopingNo < 200);
+
+    // if( verbose ) std::cout << std::endl;
+
+    if( printStats ) {
+       printf( "-- Tracks:  %5d InFlight at the end (killed).  Iterations needed = %4d \n", inFlight, iteration );
+    }
 
     if (inFlight > 0) {
       killed += inFlight;
@@ -413,7 +527,7 @@ void example18(int numParticles, double energy, int batch, const int *MCIndex_ho
       COPCORE_CUDA_CHECK(cudaStreamSynchronize(stream));
     }
   }
-  std::cout << "done!" << std::endl;
+  std::cout << "\ndone!" << std::endl;
 
   auto time = timer.Stop();
   std::cout << "Run time: " << time << "\n";
@@ -438,7 +552,7 @@ void example18(int numParticles, double energy, int batch, const int *MCIndex_ho
   COPCORE_CUDA_CHECK(cudaFree(stats_dev));
   COPCORE_CUDA_CHECK(cudaFreeHost(stats));
   COPCORE_CUDA_CHECK(cudaFree(slotManagerInit_dev));
-
+  COPCORE_CUDA_CHECK(cudaFree(BzFieldValue_dev));
   COPCORE_CUDA_CHECK(cudaStreamDestroy(stream));
 
   for (int i = 0; i < ParticleType::NumParticleTypes; i++) {
